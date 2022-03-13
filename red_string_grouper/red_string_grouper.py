@@ -5,6 +5,7 @@ import re
 
 import pandas as pd
 import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 from string_grouper import StringGrouper, StringGrouperConfig
 
@@ -96,7 +97,7 @@ def record_linkage(data_frames,
 
     def get_field_names(fields_tuples):
         if isinstance(data_frames, list):
-            return [f'{n1}/{n2}' for n1, n2, _, _ in fields_tuples]
+            return [f'{i}:{n[0]}/{n[1]}' for i, n in enumerate(fields_tuples)]
         else:
             return get_field1_names(fields_tuples)
 
@@ -152,7 +153,10 @@ def record_linkage(data_frames,
                         inplace=True)
                 horizontal_merger_list += [merger]
         else:
-            for field_name1, field_name2, sg in fuzzy_field_grouper_pairs:
+            for i, n in enumerate(fuzzy_field_grouper_pairs):
+                field_name1 = n[0]
+                field_name2 = n[1]
+                sg = n[2]
                 matches = sg.match_strings(df1[field_name1], df2[field_name2])
                 sg.clear_data()
                 matches.set_index(match_indexes, inplace=True)
@@ -168,7 +172,7 @@ def record_linkage(data_frames,
                 else:
                     merger = matches[['similarity']]
                     merger.rename(
-                        columns={'similarity': f'{field_name1}/{field_name2}'},
+                        columns={'similarity': f'{i}:{field_name1}/{field_name2}'},
                         inplace=True)
                 horizontal_merger_list += [merger]
 
@@ -177,7 +181,7 @@ def record_linkage(data_frames,
             horizontal_merger_list,
             axis=1,
             keys=key_list,
-            join='inner')
+            join='outer').fillna(0)
 
         title_exact = 'Exactly Matched Fields'
         title_fuzzy = 'Fuzzily Matched Fields'
@@ -189,7 +193,7 @@ def record_linkage(data_frames,
                 [exact_df, merged_df],
                 axis=1,
                 keys=[title_exact, title_fuzzy],
-                join='inner')
+                join='outer').fillna(0)
         totals = compute_totals(
             merged_df,
             fuzzy_field_names,
@@ -419,6 +423,16 @@ def record_linkage(data_frames,
 
 
 class RedStringGrouper(StringGrouper):
+    def _build_corpus(self): # override
+        self._vectorizer = TfidfVectorizer(analyzer=self._config.analyzer,
+                                           stop_words=self._config.stop_words,
+                                           preprocessor=self._config.preprocessor,
+                                           ngram_range=self._config.ngram_size,
+                                           dtype=self._config.tfidf_matrix_dtype,
+                                           binary=self._config.binary)
+        self._vectorizer = self._fit_vectorizer()
+        self.is_build = False  # indicates if the grouper was fit or not
+
     def n_grams(self, string: str) -> List[str]:
         """
         :param string: string to create ngrams from
